@@ -1,0 +1,798 @@
+---
+title: "Prediction Model for 30-Day Mortality After Acute Myocardial Infarction"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+theme: united
+---
+
+```{r setup, include=FALSE}
+# This code runs when the document starts
+# We only load the most essential packages
+library(pROC)      # for ROC curves (simple to use)
+
+
+```
+
+# Introduction
+
+Acute myocardial infarction (heart attack) is a serious condition. We want to predict which patients are at high risk of dying within 30 days. This can help doctors make better treatment decisions.
+
+# Part 1: Initial Data Analysis
+
+## a) Descriptives of the Key Variables
+
+```{r load-data}
+# Create our dataset with missing values
+# In real life, you would read your data like this:
+# gusto <- read.csv("gusto_data.csv")
+
+set.seed(123)  # This makes our random numbers reproducible
+n <- 1000      # We'll create 1000 patients
+
+# Create the dataset with key variables only
+gusto <- data.frame(
+  # Outcome
+  DAY30 = rbinom(n, 1, 0.1),           # 1 = died within 30 days, 0 = survived
+  
+  # Demographics
+  AGE = round(runif(n, 19, 110)),      # Age in years
+  SEX = rbinom(n, 1, 0.3),             # 1 = female, 0 = male
+  
+  # Clinical factors
+  KILLIP = sample(1:4, n, replace = TRUE),  # Killip class (1-4, higher = worse)
+  DIA = rbinom(n, 1, 0.15),             # 1 = diabetes, 0 = no diabetes
+  HRT = rbinom(n, 1, 0.4),              # 1 = high heart rate, 0 = normal
+  ANT = rbinom(n, 1, 0.4),              # 1 = anterior infarct, 0 = other location
+  PMI = rbinom(n, 1, 0.2),              # 1 = previous heart attack, 0 = no
+  
+  # ECG findings
+  STE = sample(0:11, n, replace = TRUE) # Number of leads with ST elevation (0-11)
+)
+
+# Add some missing values so we can practice handling them
+gusto$AGE[sample(1:n, 50)] <- NA        # 50 missing ages
+gusto$KILLIP[sample(1:n, 40)] <- NA     # 40 missing Killip class
+gusto$DIA[sample(1:n, 35)] <- NA        # 35 missing diabetes
+gusto$STE[sample(1:n, 45)] <- NA        # 45 missing ST elevation
+
+# Look at the first few rows to understand our data
+head(gusto)
+
+# Get the structure of our data
+str(gusto)
+
+# Quick summary of all variables
+summary(gusto)
+
+# For categorical variables, we can use table()
+table(gusto$SEX)
+table(gusto$KILLIP)
+table(gusto$DIA)
+table(gusto$HRT)
+table(gusto$ANT)
+table(gusto$PMI)
+
+# For continuous variables, we can calculate specific statistics
+# AGE
+mean(gusto$AGE, na.rm = TRUE)      # Mean age (ignore missing)
+sd(gusto$AGE, na.rm = TRUE)        # Standard deviation
+min(gusto$AGE, na.rm = TRUE)       # Minimum
+max(gusto$AGE, na.rm = TRUE)       # Maximum
+median(gusto$AGE, na.rm = TRUE)    # Median
+
+# STE
+mean(gusto$STE, na.rm = TRUE)
+sd(gusto$STE, na.rm = TRUE)
+min(gusto$STE, na.rm = TRUE)
+max(gusto$STE, na.rm = TRUE)
+median(gusto$STE, na.rm = TRUE)
+
+# Let's create a simple summary table for continuous variables
+# List our continuous variables
+cont_vars <- c("AGE", "STE")
+
+# METHOD 1: Using a for loop
+summary_table_loop <- data.frame(
+  Variable = cont_vars,
+  Mean = NA,
+  SD = NA,
+  Median = NA,
+  Min = NA,
+  Max = NA,
+  Missing = NA
+)
+
+for(i in 1:length(cont_vars)) {
+  var_name <- cont_vars[i]
+  var_data <- gusto[[var_name]]
+  
+  summary_table_loop$Mean[i] <- round(mean(var_data, na.rm = TRUE), 1)
+  summary_table_loop$SD[i] <- round(sd(var_data, na.rm = TRUE), 1)
+  summary_table_loop$Median[i] <- round(median(var_data, na.rm = TRUE), 1)
+  summary_table_loop$Min[i] <- min(var_data, na.rm = TRUE)
+  summary_table_loop$Max[i] <- max(var_data, na.rm = TRUE)
+  summary_table_loop$Missing[i] <- sum(is.na(var_data))
+}
+
+summary_table_loop
+
+# METHOD 2: Line by line (no loop)
+age_data <- gusto$AGE
+age_mean <- round(mean(age_data, na.rm = TRUE), 1)
+age_sd <- round(sd(age_data, na.rm = TRUE), 1)
+age_median <- round(median(age_data, na.rm = TRUE), 1)
+age_min <- min(age_data, na.rm = TRUE)
+age_max <- max(age_data, na.rm = TRUE)
+age_missing <- sum(is.na(age_data))
+
+ste_data <- gusto$STE
+ste_mean <- round(mean(ste_data, na.rm = TRUE), 1)
+ste_sd <- round(sd(ste_data, na.rm = TRUE), 1)
+ste_median <- round(median(ste_data, na.rm = TRUE), 1)
+ste_min <- min(ste_data, na.rm = TRUE)
+ste_max <- max(ste_data, na.rm = TRUE)
+ste_missing <- sum(is.na(ste_data))
+
+summary_table_line <- data.frame(
+  Variable = cont_vars,
+  Mean = c(age_mean, ste_mean),
+  SD = c(age_sd, ste_sd),
+  Median = c(age_median, ste_median),
+  Min = c(age_min, ste_min),
+  Max = c(age_max, ste_max),
+  Missing = c(age_missing, ste_missing)
+)
+
+summary_table_line
+
+# For categorical variables, create frequency tables
+cat_vars <- c("SEX", "KILLIP", "DIA", "HRT", "ANT", "PMI")
+
+# Using a loop
+for(var in cat_vars) {
+  cat("\n---", var, "---\n")
+  print(table(gusto[[var]], useNA = "ifany"))
+  cat("Percentage:\n")
+  print(round(prop.table(table(gusto[[var]], useNA = "ifany")) * 100, 1))
+}
+
+# Line by line example for first few
+cat("\n--- SEX ---\n")
+print(table(gusto$SEX, useNA = "ifany"))
+print(round(prop.table(table(gusto$SEX, useNA = "ifany")) * 100, 1))
+
+cat("\n--- KILLIP ---\n")
+print(table(gusto$KILLIP, useNA = "ifany"))
+print(round(prop.table(table(gusto$KILLIP, useNA = "ifany")) * 100, 1))
+```
+
+## b) Missing Values Analysis
+
+```{r missing}
+# Focus on key variables with missing data
+key_vars <- c("AGE", "KILLIP", "DIA", "STE")
+
+# METHOD 1: Using a loop
+missing_table_loop <- data.frame(
+  Variable = key_vars,
+  Missing_Count = NA,
+  Missing_Percent = NA
+)
+
+for(i in 1:length(key_vars)) {
+  var_name <- key_vars[i]
+  missing_count <- sum(is.na(gusto[[var_name]]))
+  missing_pct <- round(mean(is.na(gusto[[var_name]])) * 100, 1)
+  
+  missing_table_loop$Missing_Count[i] <- missing_count
+  missing_table_loop$Missing_Percent[i] <- missing_pct
+}
+
+missing_table_loop
+
+# METHOD 2: Line by line
+missing_AGE <- sum(is.na(gusto$AGE))
+pct_AGE <- round(mean(is.na(gusto$AGE)) * 100, 1)
+
+missing_KILLIP <- sum(is.na(gusto$KILLIP))
+pct_KILLIP <- round(mean(is.na(gusto$KILLIP)) * 100, 1)
+
+missing_DIA <- sum(is.na(gusto$DIA))
+pct_DIA <- round(mean(is.na(gusto$DIA)) * 100, 1)
+
+missing_STE <- sum(is.na(gusto$STE))
+pct_STE <- round(mean(is.na(gusto$STE)) * 100, 1)
+
+missing_table_line <- data.frame(
+  Variable = key_vars,
+  Missing_Count = c(missing_AGE, missing_KILLIP, missing_DIA, missing_STE),
+  Missing_Percent = c(pct_AGE, pct_KILLIP, pct_DIA, pct_STE)
+)
+
+missing_table_line
+
+# Check if missing data affects outcome
+# Create missing indicators
+gusto$AGE_missing <- is.na(gusto$AGE)
+gusto$KILLIP_missing <- is.na(gusto$KILLIP)
+gusto$DIA_missing <- is.na(gusto$DIA)
+gusto$STE_missing <- is.na(gusto$STE)
+
+# Compare mortality rates
+# For AGE
+rate_missing <- mean(gusto$DAY30[gusto$AGE_missing == TRUE], na.rm = TRUE)
+rate_not_missing <- mean(gusto$DAY30[gusto$AGE_missing == FALSE], na.rm = TRUE)
+cat("AGE - Mortality when missing:", round(rate_missing * 100, 1), "%\n")
+cat("AGE - Mortality when not missing:", round(rate_not_missing * 100, 1), "%\n\n")
+
+# For KILLIP
+rate_missing <- mean(gusto$DAY30[gusto$KILLIP_missing == TRUE], na.rm = TRUE)
+rate_not_missing <- mean(gusto$DAY30[gusto$KILLIP_missing == FALSE], na.rm = TRUE)
+cat("KILLIP - Mortality when missing:", round(rate_missing * 100, 1), "%\n")
+cat("KILLIP - Mortality when not missing:", round(rate_not_missing * 100, 1), "%\n\n")
+
+# Using a loop for all missing variables
+missing_vars <- c("AGE_missing", "KILLIP_missing", "DIA_missing", "STE_missing")
+cat("\n=== Using loop ===\n")
+for(var in missing_vars) {
+  rate_missing <- mean(gusto$DAY30[gusto[[var]] == TRUE], na.rm = TRUE)
+  rate_not <- mean(gusto$DAY30[gusto[[var]] == FALSE], na.rm = TRUE)
+  cat(gsub("_missing", "", var), ":\n")
+  cat("  Missing:", round(rate_missing * 100, 1), "%\n")
+  cat("  Not missing:", round(rate_not * 100, 1), "%\n\n")
+}
+```
+
+## c) Cross Tables: Outcome vs Key Predictors
+
+```{r crosstabs}
+# For categorical variables
+cat_vars <- c("SEX", "KILLIP", "DIA", "HRT", "ANT", "PMI")
+
+# METHOD 1: Using a loop
+for(var in cat_vars) {
+  cat("\n=== ", var, " ===\n")
+  # Create table
+  tbl <- table(gusto[[var]], gusto$DAY30, useNA = "ifany")
+  print(tbl)
+  
+  # Row percentages
+  cat("\nRow percentages (mortality rate by group):\n")
+  pct <- round(prop.table(tbl, 1) * 100, 1)
+  print(pct)
+  
+  # Chi-square test (to check if association is significant)
+  if(nrow(tbl) > 1 && ncol(tbl) == 2 && sum(is.na(gusto[[var]])) == 0) {
+    test <- chisq.test(tbl)
+    cat("\nChi-square p-value:", round(test$p.value, 4), "\n")
+  }
+}
+
+# METHOD 2: Line by line for key variables
+cat("\n=== SEX ===\n")
+tbl_sex <- table(gusto$SEX, gusto$DAY30, useNA = "ifany")
+print(tbl_sex)
+print(round(prop.table(tbl_sex, 1) * 100, 1))
+
+cat("\n=== KILLIP ===\n")
+tbl_killip <- table(gusto$KILLIP, gusto$DAY30, useNA = "ifany")
+print(tbl_killip)
+print(round(prop.table(tbl_killip, 1) * 100, 1))
+
+cat("\n=== DIA (Diabetes) ===\n")
+tbl_dia <- table(gusto$DIA, gusto$DAY30, useNA = "ifany")
+print(tbl_dia)
+print(round(prop.table(tbl_dia, 1) * 100, 1))
+
+# For continuous variables, create groups
+# AGE groups
+gusto$AGE_group <- cut(gusto$AGE, 
+                       breaks = c(0, 50, 65, 80, 120),
+                       labels = c("<50", "50-65", "66-80", ">80"))
+
+cat("\n=== AGE Groups ===\n")
+tbl_age <- table(gusto$AGE_group, gusto$DAY30, useNA = "ifany")
+print(tbl_age)
+print(round(prop.table(tbl_age, 1) * 100, 1))
+
+# STE groups (low, medium, high)
+gusto$STE_group <- cut(gusto$STE,
+                       breaks = c(-1, 2, 5, 12),
+                       labels = c("0-2 leads", "3-5 leads", ">5 leads"))
+
+cat("\n=== ST Elevation Groups ===\n")
+tbl_ste <- table(gusto$STE_group, gusto$DAY30, useNA = "ifany")
+print(tbl_ste)
+print(round(prop.table(tbl_ste, 1) * 100, 1))
+```
+
+## d) Univariable Relationships (Single Predictor Models)
+
+```{r univariable}
+# Key predictors we want to test
+key_predictors <- c("AGE", "SEX", "KILLIP", "DIA", "HRT", "ANT", "PMI", "STE")
+
+# METHOD 1: Using a loop
+# Create empty vectors to store results
+or_values <- c()
+ci_lower <- c()
+ci_upper <- c()
+p_values <- c()
+
+for(i in 1:length(key_predictors)) {
+  # Create formula
+  formula <- as.formula(paste("DAY30 ~", key_predictors[i]))
+  
+  # Fit model
+  model <- glm(formula, data = gusto, family = binomial)
+  
+  # Get results (if model converged)
+  coef_sum <- summary(model)$coefficients
+  
+  if(nrow(coef_sum) > 1) {
+    or_values[i] <- round(exp(coef_sum[2, 1]), 2)
+    ci <- exp(confint(model)[2, ])
+    ci_lower[i] <- round(ci[1], 2)
+    ci_upper[i] <- round(ci[2], 2)
+    p_values[i] <- round(coef_sum[2, 4], 4)
+  } else {
+    or_values[i] <- NA
+    ci_lower[i] <- NA
+    ci_upper[i] <- NA
+    p_values[i] <- NA
+  }
+}
+
+# Create results table
+univariable_table <- data.frame(
+  Predictor = key_predictors,
+  Odds_Ratio = or_values,
+  CI_lower = ci_lower,
+  CI_upper = ci_upper,
+  P_value = p_values
+)
+
+univariable_table
+
+# METHOD 2: Line by line for each predictor
+
+# AGE
+model_age <- glm(DAY30 ~ AGE, data = gusto, family = binomial)
+coef_age <- summary(model_age)$coefficients
+or_age <- round(exp(coef_age[2, 1]), 2)
+ci_age <- exp(confint(model_age)[2, ])
+p_age <- round(coef_age[2, 4], 4)
+
+# SEX
+model_sex <- glm(DAY30 ~ SEX, data = gusto, family = binomial)
+coef_sex <- summary(model_sex)$coefficients
+or_sex <- round(exp(coef_sex[2, 1]), 2)
+ci_sex <- exp(confint(model_sex)[2, ])
+p_sex <- round(coef_sex[2, 4], 4)
+
+# KILLIP
+model_killip <- glm(DAY30 ~ KILLIP, data = gusto, family = binomial)
+coef_killip <- summary(model_killip)$coefficients
+or_killip <- round(exp(coef_killip[2, 1]), 2)
+ci_killip <- exp(confint(model_killip)[2, ])
+p_killip <- round(coef_killip[2, 4], 4)
+
+# DIA (Diabetes)
+model_dia <- glm(DAY30 ~ DIA, data = gusto, family = binomial)
+coef_dia <- summary(model_dia)$coefficients
+or_dia <- round(exp(coef_dia[2, 1]), 2)
+ci_dia <- exp(confint(model_dia)[2, ])
+p_dia <- round(coef_dia[2, 4], 4)
+
+# Create table with first 4 predictors
+univariable_line <- data.frame(
+  Predictor = c("AGE", "SEX", "KILLIP", "DIA"),
+  Odds_Ratio = c(or_age, or_sex, or_killip, or_dia),
+  CI_lower = c(ci_age[1], ci_sex[1], ci_killip[1], ci_dia[1]),
+  CI_upper = c(ci_age[2], ci_sex[2], ci_killip[2], ci_dia[2]),
+  P_value = c(p_age, p_sex, p_killip, p_dia)
+)
+
+univariable_line
+
+# Interpretation help
+cat("\n=== INTERPRETATION ===\n")
+cat("Odds Ratio > 1 means higher risk of death\n")
+cat("Odds Ratio < 1 means lower risk of death\n")
+cat("95% CI not crossing 1 means statistically significant\n")
+cat("P-value < 0.05 means statistically significant\n")
+```
+
+# Part 2: Model Development
+
+## a) Choosing Predictor Format
+
+```{r choose_format}
+# For this example, we'll use the continuous versions
+# because they preserve more information
+
+# We'll keep:
+# - AGE (continuous) instead of creating age categories
+# - KILLIP (continuous 1-4) because it's already ordered
+# - STE (continuous 0-11) because number of leads matters
+
+# Check if they are associated with outcome
+cor(gusto$AGE, gusto$DAY30, use = "complete.obs")
+cor(gusto$KILLIP, gusto$DAY30, use = "complete.obs")
+cor(gusto$STE, gusto$DAY30, use = "complete.obs")
+```
+
+## b) Building a Multivariable Model
+
+```{r building_model}
+# Prepare data for modeling
+gusto_model <- gusto
+
+# Create missing indicators for key variables
+gusto_model$AGE_miss <- ifelse(is.na(gusto_model$AGE), 1, 0)
+gusto_model$KILLIP_miss <- ifelse(is.na(gusto_model$KILLIP), 1, 0)
+gusto_model$DIA_miss <- ifelse(is.na(gusto_model$DIA), 1, 0)
+gusto_model$STE_miss <- ifelse(is.na(gusto_model$STE), 1, 0)
+
+# Simple imputation: replace missing with median (for continuous) or mode (for categorical)
+
+# AGE (continuous) - impute with median
+age_median <- median(gusto$AGE, na.rm = TRUE)
+gusto_model$AGE[is.na(gusto_model$AGE)] <- age_median
+
+# STE (continuous) - impute with median
+ste_median <- median(gusto$STE, na.rm = TRUE)
+gusto_model$STE[is.na(gusto_model$STE)] <- ste_median
+
+# KILLIP (categorical) - impute with most common value
+killip_table <- table(gusto$KILLIP)
+killip_mode <- as.numeric(names(killip_table)[which.max(killip_table)])
+gusto_model$KILLIP[is.na(gusto_model$KILLIP)] <- killip_mode
+
+# DIA (binary) - impute with most common value
+dia_table <- table(gusto$DIA)
+dia_mode <- as.numeric(names(dia_table)[which.max(dia_table)])
+gusto_model$DIA[is.na(gusto_model$DIA)] <- dia_mode
+
+# HRT and others don't have missing in our example, but if they did:
+# hrt_table <- table(gusto$HRT)
+# hrt_mode <- as.numeric(names(hrt_table)[which.max(hrt_table)])
+# gusto_model$HRT[is.na(gusto_model$HRT)] <- hrt_mode
+
+# Now build our initial model with key predictors
+# We'll include predictors that made clinical sense and had p < 0.2 in univariable analysis
+initial_model <- glm(DAY30 ~ AGE + KILLIP + DIA + HRT + ANT + PMI + STE +
+                     AGE_miss + KILLIP_miss + DIA_miss + STE_miss,
+                     data = gusto_model, family = binomial)
+
+# Look at the results
+summary(initial_model)
+
+# Simplify model by removing non-significant predictors (p > 0.05)
+# Based on the summary, we might keep only significant ones
+# This is a manual approach - we look at p-values and remove highest first
+
+# For teaching, let's create a final model with the most important predictors
+final_model <- glm(DAY30 ~ AGE + KILLIP + DIA + STE + AGE_miss,
+                   data = gusto_model, family = binomial)
+
+summary(final_model)
+```
+
+## c) Final Model Coefficients
+
+```{r final_coef}
+# Get detailed results from final model
+coef_summary <- summary(final_model)$coefficients
+conf_ints <- confint(final_model)
+
+# Create a nice table
+variables <- rownames(coef_summary)
+results <- data.frame(
+  Variable = variables,
+  Coefficient = round(coef_summary[, 1], 3),
+  `Std Error` = round(coef_summary[, 2], 3),
+  `P-value` = round(coef_summary[, 4], 4),
+  `Odds Ratio` = round(exp(coef_summary[, 1]), 2),
+  `OR Lower` = round(exp(conf_ints[, 1]), 2),
+  `OR Upper` = round(exp(conf_ints[, 2]), 2)
+)
+
+results
+
+# Interpretation of each predictor
+cat("\n=== INTERPRETATION OF RESULTS ===\n")
+for(i in 2:nrow(results)) {
+  cat("\n", results$Variable[i], ":\n")
+  cat("  OR =", results$Odds.Ratio[i], 
+      " (95% CI:", results$OR.Lower[i], "-", results$OR.Upper[i], ")\n")
+  if(results$P.value[i] < 0.05) {
+    cat("  This is statistically significant (p < 0.05)\n")
+  } else {
+    cat("  This is NOT statistically significant (p >= 0.05)\n")
+  }
+}
+```
+
+## d) Check for Important Interactions
+
+```{r interactions}
+# Test if age effect differs by diabetes status
+model_int1 <- glm(DAY30 ~ AGE * DIA + KILLIP + STE + AGE_miss,
+                  data = gusto_model, family = binomial)
+
+# Compare with main effects model
+anova(final_model, model_int1, test = "Chisq")
+
+# Test if age effect differs by Killip class
+model_int2 <- glm(DAY30 ~ AGE * KILLIP + DIA + STE + AGE_miss,
+                  data = gusto_model, family = binomial)
+
+anova(final_model, model_int2, test = "Chisq")
+
+# If p-value > 0.05, interaction is not significant
+```
+
+## e) Regression Formula
+
+```{r formula}
+# Write out the model formula
+coefs <- coef(final_model)
+
+cat("Probability of death within 30 days = 1 / (1 + e^(-z))\n")
+cat("where z =")
+
+cat("\n", round(coefs[1], 3), " (intercept)")
+
+for(i in 2:length(coefs)) {
+  sign <- ifelse(coefs[i] > 0, " + ", " - ")
+  cat(sign, abs(round(coefs[i], 3)), "×", names(coefs)[i])
+}
+
+# Example calculation for a specific patient
+cat("\n\n=== EXAMPLE CALCULATION ===\n")
+cat("Patient: AGE = 75, KILLIP = 3, DIA = 1, STE = 5, AGE_miss = 0\n")
+
+z <- coefs[1] + 
+     coefs[2] * 75 + 
+     coefs[3] * 3 + 
+     coefs[4] * 1 + 
+     coefs[5] * 5 + 
+     coefs[6] * 0
+
+prob <- 1 / (1 + exp(-z))
+cat("z =", round(z, 3), "\n")
+cat("Predicted probability of death =", round(prob * 100, 1), "%\n")
+```
+
+## f) Simple Clinical Risk Score
+
+```{r clinical}
+# Create a simplified scoring system
+# Multiply coefficients by 10 and round to make integers
+coefs <- coef(final_model)[-1]  # exclude intercept
+
+scores <- round(coefs * 10, 0)
+
+score_chart <- data.frame(
+  Predictor = names(coefs),
+  Points = scores,
+  How_to_use = c("Per 10 years", "Per 1 class increase", "1 if yes, 0 if no", 
+                 "Per lead", "1 if age missing")
+)
+
+score_chart
+
+# Calculate risk score for each patient
+gusto_model$risk_score <- 
+  scores[1] * (gusto_model$AGE / 10) +  # Age per 10 years
+  scores[2] * gusto_model$KILLIP +
+  scores[3] * gusto_model$DIA +
+  scores[4] * gusto_model$STE +
+  scores[5] * gusto_model$AGE_miss
+
+# Look at relationship between score and actual outcome
+# Create score groups
+gusto_model$risk_group <- cut(gusto_model$risk_score, 
+                              breaks = quantile(gusto_model$risk_score, 
+                                               probs = seq(0, 1, 0.2)),
+                              labels = c("Very Low", "Low", "Medium", "High", "Very High"))
+
+# Calculate mortality in each group
+for(group in levels(gusto_model$risk_group)) {
+  idx <- gusto_model$risk_group == group & !is.na(gusto_model$risk_group)
+  mortality <- mean(gusto_model$DAY30[idx], na.rm = TRUE)
+  n_patients <- sum(idx)
+  cat(group, ": n =", n_patients, ", mortality =", round(mortality * 100, 1), "%\n")
+}
+```
+
+# Part 3: Validation and Performance
+
+## a) Model Performance
+
+```{r performance}
+# Calculate predicted probabilities
+gusto_model$pred_prob <- predict(final_model, type = "response")
+
+# ROC curve
+roc_curve <- roc(gusto_model$DAY30, gusto_model$pred_prob)
+plot(roc_curve, main = "ROC Curve for 30-Day Mortality Prediction")
+text(0.8, 0.2, paste("AUC =", round(auc(roc_curve), 3)))
+
+auc_value <- auc(roc_curve)
+auc_ci <- ci.auc(roc_curve)
+
+cat("=== DISCRIMINATION (How well model separates survivors from non-survivors) ===\n")
+cat("AUC:", round(auc_value, 3), "\n")
+cat("95% CI:", round(auc_ci[1], 3), "-", round(auc_ci[3], 3), "\n")
+cat("Interpretation:\n")
+cat("  AUC = 0.5: No better than chance\n")
+cat("  AUC = 0.7-0.8: Acceptable\n")
+cat("  AUC = 0.8-0.9: Excellent\n")
+cat("  AUC > 0.9: Outstanding\n\n")
+
+# Calibration: how well predicted probabilities match observed outcomes
+# Create 10 groups based on predicted risk
+gusto_model$risk_group <- cut(gusto_model$pred_prob, 
+                              breaks = quantile(gusto_model$pred_prob, 
+                                               probs = seq(0, 1, 0.1)),
+                              include.lowest = TRUE)
+
+# Calculate mean predicted and observed for each group
+calibration_table <- data.frame(
+  Group = 1:10,
+  N = NA,
+  Predicted = NA,
+  Observed = NA
+)
+
+for(i in 1:10) {
+  # This is a bit complex, but it gets the groups correctly
+  group_name <- levels(gusto_model$risk_group)[i]
+  idx <- gusto_model$risk_group == group_name & !is.na(gusto_model$risk_group)
+  
+  calibration_table$N[i] <- sum(idx)
+  calibration_table$Predicted[i] <- round(mean(gusto_model$pred_prob[idx], na.rm = TRUE), 3)
+  calibration_table$Observed[i] <- round(mean(gusto_model$DAY30[idx], na.rm = TRUE), 3)
+}
+
+cat("=== CALIBRATION (How well predicted risks match actual outcomes) ===\n")
+print(calibration_table)
+
+# Simple calibration plot
+plot(calibration_table$Predicted, calibration_table$Observed, 
+     xlab = "Predicted Risk", ylab = "Observed Risk",
+     main = "Calibration Plot", 
+     xlim = c(0, max(calibration_table$Predicted, calibration_table$Observed)),
+     ylim = c(0, max(calibration_table$Predicted, calibration_table$Observed)),
+     pch = 19, col = "blue")
+abline(0, 1, col = "red", lwd = 2)  # Perfect calibration line
+legend("topleft", legend = "Perfect calibration", col = "red", lwd = 2)
+```
+
+## b) Simple Validation (Split-sample)
+
+```{r validation}
+# Split data into training (70%) and validation (30%)
+set.seed(123)
+n_train <- round(0.7 * nrow(gusto_model))
+train_idx <- sample(1:nrow(gusto_model), n_train, replace = FALSE)
+
+train_data <- gusto_model[train_idx, ]
+valid_data <- gusto_model[-train_idx, ]
+
+# Refit model on training data
+train_model <- glm(DAY30 ~ AGE + KILLIP + DIA + STE + AGE_miss,
+                   data = train_data, family = binomial)
+
+# Apply to validation data
+valid_data$pred_prob <- predict(train_model, newdata = valid_data, type = "response")
+
+# Calculate AUC in validation set
+valid_roc <- roc(valid_data$DAY30, valid_data$pred_prob)
+valid_auc <- auc(valid_roc)
+
+cat("=== VALIDATION RESULTS ===\n")
+cat("Training set AUC:", round(auc(roc(train_data$DAY30, 
+                                        predict(train_model, type = "response"))), 3), "\n")
+cat("Validation set AUC:", round(valid_auc, 3), "\n")
+cat("Difference:", round(abs(valid_auc - auc_value), 3), "\n")
+cat("Small difference (<0.05) suggests model is not overfitted\n")
+```
+
+# Part 4: Conclusions
+
+```{r conclusions}
+cat("=== SUMMARY OF FINDINGS ===\n\n")
+
+cat("1. DATA DESCRIPTION:\n")
+cat("   - Total patients:", nrow(gusto), "\n")
+cat("   - Mortality rate:", round(mean(gusto$DAY30, na.rm = TRUE) * 100, 1), "%\n")
+cat("   - Key predictors: Age, Killip class, Diabetes, ST elevation\n\n")
+
+cat("2. MODEL PERFORMANCE:\n")
+cat("   - AUC:", round(auc_value, 3), "\n")
+cat("   - This means the model can distinguish between\n")
+cat("     survivors and non-survivors", 
+    ifelse(auc_value > 0.7, "reasonably well", "poorly"), "\n\n")
+
+cat("3. KEY PREDICTORS:\n")
+for(i in 2:nrow(results)) {
+  cat("   -", results$Variable[i], ": ")
+  cat("OR =", results$Odds.Ratio[i])
+  if(results$P.value[i] < 0.05) cat(" (significant)")
+  cat("\n")
+}
+
+cat("\n4. CLINICAL USE:\n")
+cat("   - The model can help identify high-risk patients\n")
+cat("   - Simple scoring system:\n")
+for(i in 1:nrow(score_chart)) {
+  cat("     * ", score_chart$Predictor[i], ": ", score_chart$Points[i], 
+      " points ", score_chart$How_to_use[i], "\n", sep="")
+}
+
+cat("\n5. LIMITATIONS:\n")
+cat("   - Missing data required imputation\n")
+cat("   - Need validation in other populations\n")
+cat("   - Model should be updated with new data\n")
+
+cat("\n6. NEXT STEPS:\n")
+cat("   - Test in other hospitals\n")
+cat("   - Create a simple calculator app for bedside use\n")
+cat("   - Consider adding other important predictors\n")
+cat("   - Update model as new data becomes available\n")
+```
+
+# Appendix: R Functions Used in This Analysis
+
+```{r appendix, eval=FALSE}
+# BASIC FUNCTIONS:
+# head()        - View first few rows
+# str()         - Check data structure
+# summary()     - Quick statistics
+# table()       - Frequency tables
+# prop.table()  - Convert to percentages
+# mean()        - Calculate average
+# sd()          - Standard deviation
+# min(), max()  - Minimum and maximum
+# median()      - Median value
+# quantile()    - Percentiles
+# is.na()       - Check for missing values
+# colSums()     - Sum of columns
+
+# DATA MANIPULATION:
+# data.frame()  - Create data frame
+# names()       - Get column names
+# rownames()    - Get row names
+# [ , ]         - Select rows and columns
+# $             - Select a column
+# ifelse()      - Conditional statements
+# cut()         - Create categories from continuous
+
+# STATISTICS:
+# glm()         - Logistic regression
+# summary()     - Model results
+# coef()        - Extract coefficients
+# confint()     - Confidence intervals
+# exp()         - Exponential (for odds ratios)
+# predict()     - Make predictions
+# roc()         - Create ROC curve (from pROC)
+# auc()         - Get AUC value
+# ci.auc()      - Confidence interval for AUC
+# anova()       - Compare models
+# chisq.test()  - Chi-square test
+
+# PROGRAMMING:
+# for()         - Loops
+# paste()       - Combine text
+# as.formula()  - Create formula from text
+# c()           - Combine values
+# length()      - Length of vector
+# nrow(), ncol() - Get dimensions
+```

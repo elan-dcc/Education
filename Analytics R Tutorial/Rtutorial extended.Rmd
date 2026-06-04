@@ -1,0 +1,595 @@
+---
+title: "Rtutorial Extended"
+output: html_document
+date: "2026-02-26"
+---
+
+# 1. Installing and Loading R Packages
+
+In this section you will learn how to extend R’s capabilities by installing and loading packages. Packages are collections of functions and data that other users have written and shared. Many analyses in epidemiology and biostatistics (including logistic regression and likelihood-ratio tests) use functions from add-on packages or from base R; knowing how to install and load packages is essential.
+
+**Learning goals:**
+
+-   Install a package from CRAN using `install.packages()`
+-   Load a package into your session using `library()`
+-   Use functions provided by a loaded package
+-   Understand the difference between installing (once) and loading (each session)
+
+**Section structure:**
+
+-   1.1. What are R packages?
+-   1.2. Installing packages
+-   1.3. Loading packages with `library()`
+-   1.4. Using functions from a package
+
+------------------------------------------------------------------------
+
+## 1.1. What are R packages?
+
+R comes with many built-in functions (base R). **Packages** add more functions and sometimes example datasets. They are hosted on **CRAN** (Comprehensive R Archive Network). Installing a package downloads it to your computer; **loading** it with `library()` makes its functions available in your current R session.
+
+You **install** a package once (or when you want to update it). You **load** it every time you start a new R session and need to use it.
+
+------------------------------------------------------------------------
+
+## 1.2. Installing packages
+
+Use `install.packages()` to install a package. The package name must be in quotes. You only need to do this once per machine (or again when you want to update).
+
+**Explanation:** R will download the package and any dependencies from CRAN and install them into your library path. This may take a minute and requires an internet connection.
+
+```{r install-packages, eval = FALSE}
+# Install a single package (run once)
+install.packages("MASS")
+
+# Install multiple packages at once
+install.packages(c("MASS", "lmtest"))
+```
+
+*Note:* The chunk above is set to `eval = FALSE` so that knitting the document does not reinstall packages every time. Run it manually in RStudio when you need to install.
+
+**Example:** Installing the **MASS** package (useful for advanced regression and example data) and **lmtest** (useful for likelihood-ratio tests):
+
+```{r install-example, eval = FALSE}
+install.packages("MASS")   # for logistic regression examples and data
+install.packages("lmtest") # for lrtest() - likelihood ratio test
+```
+
+If R asks you to choose a CRAN mirror, pick one close to your location (e.g. "0-Cloud" or your country).
+
+------------------------------------------------------------------------
+
+### Exercise 1.2.1: Install a package
+
+Install the package **lmtest** using `install.packages()`. Run the command in the console or in a chunk with `eval = TRUE` once.
+
+```{r}
+# Write your answer below (run once, then you can set eval = FALSE):
+# install.packages("lmtest")
+```
+
+------------------------------------------------------------------------
+
+## 1.3. Loading packages with `library()`
+
+After a package is installed, you **load** it with `library()`. Do this at the start of your script or analysis, once per session. The package name can be with or without quotes.
+
+**Explanation:** Loading attaches the package’s namespace so that all its exported functions are available by name. If the package is not installed, `library()` will give an error asking you to install it first.
+
+```{r load-library}
+# Load MASS (package name without quotes is fine)
+library(MASS)
+
+# Load lmtest
+library(lmtest)
+```
+
+After loading, you can use functions from that package (see next subsection). If you close R and open it again, you must run `library()` again; you do **not** need to run `install.packages()` again unless you want to update.
+
+------------------------------------------------------------------------
+
+### Exercise 1.3.1: Load a package
+
+Load the **lmtest** package using `library(lmtest)` in the chunk below.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 1.4. Using functions from a package
+
+Once a package is loaded, you call its functions by name. You can also use the form `package::function()` to call a function without loading the whole package (useful in scripts to show where a function comes from).
+
+**Explanation:**
+
+-   **After loading:** `function_name(...)`\
+    Example: after `library(MASS)`, you can use `glm.nb()`.
+-   **Without loading:** `package::function_name(...)`\
+    Example: `lmtest::lrtest(model1, model2)` uses `lrtest` from **lmtest** even if you have not run `library(lmtest)`.
+
+**Example:** Using a function from **MASS** after loading it:
+
+```{r use-package-function}
+library(MASS)
+# MASS provides glm.nb(), fitdistr(), and the birthwt dataset.
+# Check that the package is loaded by using its data:
+data(birthwt)
+head(birthwt, 3)
+```
+
+A more practical example: **lmtest** provides `lrtest()` for likelihood-ratio tests. After `library(lmtest)`, you can run:
+
+```{r lrtest-example-call, eval = FALSE}
+# lrtest(reduced_model, full_model)  # we use this in Section 4
+```
+
+We will use `glm()` (base R) for logistic regression and `lrtest()` from **lmtest** in the logistic regression section.
+
+------------------------------------------------------------------------
+
+### Exercise 1.4.1: Call a function from a package
+
+Load **lmtest** and call `lrtest()` with two nested models. For example, fit two linear models on `iris`: `m0 <- lm(Sepal.Length ~ 1, data = iris)` and `m1 <- lm(Sepal.Length ~ Sepal.Width, data = iris)`, then run `lrtest(m0, m1)`. Interpret the p-value (does adding `Sepal.Width` improve the model?).
+
+```{r}
+# Write your answer below (requires lmtest and dataset iris):
+```
+
+------------------------------------------------------------------------
+
+# 2. Data Loading and Data Checking
+
+Before running any analysis, you need to **load** your data into R and then **check** it: dimensions, column names, types, missing values, and summary statistics. This section covers how to read data from files and how to verify its structure and quality.
+
+**Learning goals:**
+
+-   Load data from CSV and Excel files using `read.csv()` and `readxl::read_excel()`
+-   Use `dim()`, `nrow()`, `ncol()`, `names()`, and `str()` to check dimensions and structure
+-   Use `summary()` and `class()` to inspect data types and ranges
+-   Check for missing values with `is.na()` and `colSums(is.na())`
+
+**Section structure:**
+
+-   2.1. Data loading (CSV, Excel, file paths)
+-   2.2. Structure and dimensions
+-   2.3. First and last rows: `head()` and `tail()`
+-   2.4. Summary statistics and data types
+-   2.5. Missing values and simple checks
+
+------------------------------------------------------------------------
+
+## 2.1. Data loading
+
+**Explanation:** Most real-world data lives in files (e.g. CSV, Excel). You load it into R with functions that read the file and return a **data frame**. The file path can be relative to your **working directory** or an absolute path.
+
+-   **`read.csv("file.csv")`** — base R; reads comma-separated values. Use `read.csv2()` for semicolon-separated (common in Europe).
+-   **`readxl::read_excel("file.xlsx")`** — from the **readxl** package; reads Excel files. Install with `install.packages("readxl")` and load with `library(readxl)`.
+-   **`getwd()`** — prints current working directory. **`setwd("path/to/folder")`** — sets it (use forward slashes or double backslashes on Windows).
+
+**Example:** Reading a CSV file (use a path that exists on your machine, or create a small CSV for practice):
+
+```{r data-load-csv, eval = FALSE}
+# Set working directory to where your file is (optional)
+# setwd("C:/Users/YourName/Documents/data")
+
+# Read CSV into a data frame
+my_data <- read.csv("mydata.csv")
+
+# With options: header = TRUE (default), stringsAsFactors, na.strings
+my_data <- read.csv("mydata.csv", na.strings = c("", "NA", "Missing"))
+```
+
+**Example:** Reading an Excel file with **readxl**:
+
+```{r data-load-excel, eval = FALSE}
+library(readxl)
+# First sheet by default
+my_data <- read_excel("mydata.xlsx")
+# Specific sheet by name or position
+my_data <- read_excel("mydata.xlsx", sheet = "Sheet1")
+```
+
+After loading, always run a few checks (dimensions, names, types, missing values) as in the following subsections.
+
+------------------------------------------------------------------------
+
+### Exercise 2.1.1: Load a data file
+
+If you have a CSV or Excel file, load it into an object (e.g. `my_data`) using `read.csv()` or `read_excel()`. If not, use `read.csv()` with a built-in dataset: `read.csv(system.file("extdata", "some_file.csv", package = "MASS"))` or simply assign `my_data <- mtcars` for practice. Then run `dim(my_data)` and `names(my_data)` to confirm it loaded.
+
+```{r}
+# Write your answer below (e.g. my_data <- read.csv("yourfile.csv") or my_data <- mtcars):
+```
+
+------------------------------------------------------------------------
+
+## 2.2. Structure and dimensions
+
+**Explanation:** Knowing how many rows and columns you have, and what each column is (numeric, factor, character), prevents mistakes in later analysis.
+
+-   **`dim(df)`** — returns (number of rows, number of columns).
+-   **`nrow(df)`** and **`ncol(df)`** — number of rows and columns.
+-   **`names(df)`** — column names.
+-   **`str(df)`** — compact view of each column’s type and first values.
+
+**Example:** Using the built-in `mtcars` data:
+
+```{r dim-names-str}
+dim(mtcars)
+nrow(mtcars)
+ncol(mtcars)
+names(mtcars)
+str(mtcars)
+```
+
+------------------------------------------------------------------------
+
+### Exercise 2.2.1: Dimensions and names
+
+If you have the Metabolic Syndrome data from the main tutorial, assign it to `df_check` (or use `df_check <- mtcars`). Then run `dim()`, `names()`, and `str()` on `df_check` and interpret the output.
+
+```{r}
+# Write your answer below (e.g. df_check <- mtcars or your imported data):
+```
+
+------------------------------------------------------------------------
+
+## 2.3. First and last rows: `head()` and `tail()`
+
+**Explanation:** `head()` and `tail()` let you **see** the first or last rows of a data frame. By default they show 6 rows; you can change that with the second argument.
+
+```{r head-tail}
+head(mtcars)
+head(mtcars, 3)
+tail(mtcars, 4)
+```
+
+------------------------------------------------------------------------
+
+### Exercise 2.3.1: Use head and tail
+
+Using the same data frame as in Exercise 2.2.1, show the first 10 rows with `head()` and the last 5 rows with `tail()`.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 2.4. Summary statistics and data types
+
+**Explanation:** **`summary()`** gives a quick summary for each column: for numeric columns it shows Min, 1st Qu., Median, Mean, 3rd Qu., Max, and the number of NAs; for factors it shows counts by level. **`class()`** applied to a column (e.g. `class(df$age)`) tells you the **data type** (e.g. `"numeric"`, `"factor"`, `"character"`). **`str(df)`** (from 2.2) also shows types for all columns.
+
+```{r summary}
+summary(mtcars)
+```
+
+Use this to spot impossible values (e.g. negative age), unexpected ranges, and missing values.
+
+------------------------------------------------------------------------
+
+### Exercise 2.4.1: Summary and data types
+
+Run `summary()` on your chosen data frame from Exercise 2.2.1. Use `class()` on one numeric and one other column (e.g. `class(mtcars$mpg)` and `class(mtcars$cyl)`). Name one thing you learn (e.g. range of a variable, presence of NAs, or column type).
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 2.5. Missing values and simple checks
+
+**Explanation:** Many models (including logistic regression) need to know about **missing values** (NA). You can count NAs per column and check classes.
+
+-   **`is.na(df)`** — logical matrix: TRUE where value is NA.
+-   **`colSums(is.na(df))`** — number of NAs per column.
+-   **`any(is.na(df))`** — TRUE if there is at least one NA.
+
+**Example:** Create a small data frame with one NA and check:
+
+```{r na-check}
+small_df <- data.frame(
+  id = 1:4,
+  age = c(45, NA, 37, 61),
+  outcome = c(0, 1, 0, 1)
+)
+colSums(is.na(small_df))
+any(is.na(small_df))
+```
+
+For logistic regression, you may need to exclude or impute rows with NA in the outcome or predictors; checking NAs first is good practice.
+
+------------------------------------------------------------------------
+
+### Exercise 2.5.1: Count missing values
+
+Using `small_df` from the example above, use `colSums(is.na(small_df))` to see how many NAs are in each column. Then create a one-line command that returns TRUE only if the column `outcome` has any NA.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+# 3. Logistic Regression in R
+
+Logistic regression is used when the **outcome** is **binary** (e.g. disease yes/no, success/failure). R fits it with **`glm()`** (generalized linear model) and `family = binomial`.
+
+**Learning goals:**
+
+-   Fit a simple logistic regression model with `glm(..., family = binomial)`
+-   Interpret the model output: coefficients, odds ratios, and (optionally) deviance
+-   Relate the model to the likelihood and deviance (for the next section on likelihood-ratio tests)
+
+**Section structure:**
+
+-   3.1. Why logistic regression?
+-   3.2. Fitting a logistic model with `glm()`
+-   3.3. Interpreting coefficients and odds ratios
+-   3.4. Example with a binary outcome
+
+------------------------------------------------------------------------
+
+## 3.1. Why logistic regression?
+
+**Explanation:** When the outcome is binary (0/1), linear regression can give predictions outside 0–1. Logistic regression models the **log-odds** of the event (e.g. disease = 1), which keeps probabilities between 0 and 1. The **likelihood** of the model is used both for parameter estimation and for comparing models (likelihood-ratio test).
+
+------------------------------------------------------------------------
+
+## 3.2. Fitting a logistic model with `glm()`
+
+**Explanation:** In R you use **`glm()`** with `family = binomial` (and default link `"logit"`). The formula is like in linear regression: `outcome ~ predictor1 + predictor2`.
+
+**Syntax:**
+
+``` r
+model <- glm(outcome ~ predictor, data = mydata, family = binomial)
+```
+
+**Example:** Using the built-in **birthwt** data from **MASS** (low birth weight as outcome):
+
+```{r glm-fit}
+library(MASS)
+data(birthwt)
+# Low birth weight (1 = low, 0 = normal); age of mother as predictor
+fit1 <- glm(low ~ age, data = birthwt, family = binomial)
+fit1
+summary(fit1)
+```
+
+The **coefficients** are on the **log-odds** scale. The **deviance** in the output is related to the **log-likelihood** (deviance = -2 × log-likelihood for the current model, up to an additive constant). We use this when comparing models with a likelihood-ratio test.
+
+------------------------------------------------------------------------
+
+### Exercise 3.2.1: Fit a logistic model
+
+Using `birthwt`, fit a logistic model with `low` as outcome and `lwt` (mother’s weight in pounds) as the only predictor. Store it in `fit_lwt` and run `summary(fit_lwt)`.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 3.3. Interpreting coefficients and odds ratios
+
+**Explanation:** The coefficient for a predictor is the change in **log-odds** of the outcome for a one-unit increase in that predictor. **Odds ratio (OR)** = exp(coefficient). OR \> 1 means higher predictor is associated with higher odds of the outcome.
+
+**Example:** From the previous model, exponentiate the coefficient for `age`:
+
+```{r odds-ratio}
+coef(fit1)
+exp(coef(fit1))
+# Interpretation: per year increase in age, odds of low birth weight multiply by exp(age coef)
+```
+
+------------------------------------------------------------------------
+
+### Exercise 3.3.1: Odds ratio for lwt
+
+Using `fit_lwt` from Exercise 3.2.1, obtain the coefficient for `lwt` and its exponent (odds ratio). In one sentence, say whether higher mother’s weight is associated with higher or lower odds of low birth weight.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 3.4. Example with a binary outcome
+
+**Full example:** Fit a model with two predictors and show summary and odds ratios:
+
+```{r glm-two-pred}
+fit2 <- glm(low ~ age + lwt, data = birthwt, family = binomial)
+summary(fit2)
+exp(coef(fit2))
+```
+
+You can add more predictors (e.g. `smoke`, `ht`) the same way. Checking the data after loading (Section 2: dimensions, types, missing values) ensures that `low`, `age`, and `lwt` have no unexpected missing values or coding.
+
+------------------------------------------------------------------------
+
+### Exercise 3.4.1: Two-predictor logistic model
+
+Fit a logistic model for `low` with predictors `age` and `smoke` (smoking status). Print the summary and the odds ratios for both predictors. Briefly interpret the odds ratio for `smoke`.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+# 4. Likelihood-Ratio Test for Comparing Models
+
+The **likelihood-ratio test (LRT)** compares two **nested** models: a simpler (reduced) model and a larger (full) model. The test statistic is based on the difference in **log-likelihoods** (or equivalently, in **deviances**). In R you can use **`anova()`** for `glm` objects (with `test = "Chisq"`) or **`lrtest()`** from the **lmtest** package.
+
+**Learning goals:**
+
+-   Understand that the LRT compares nested models using the difference in deviance (or log-likelihood)
+-   Perform an LRT in R using `anova(..., test = "Chisq")` or `lrtest()`
+-   Interpret the test: significant p-value suggests the extra predictor(s) improve the model
+
+**Section structure:**
+
+-   4.1. What is the likelihood-ratio test?
+-   4.2. LRT with `anova()` (base R)
+-   4.3. LRT with `lrtest()` (lmtest)
+-   4.4. Full example and exercise
+
+------------------------------------------------------------------------
+
+## 4.1. What is the likelihood-ratio test?
+
+**Explanation:** Suppose you have:
+
+-   **Reduced model:** e.g. `low ~ age`
+-   **Full model:** e.g. `low ~ age + lwt`
+
+The full model has more parameters and will have a higher (or equal) log-likelihood. The **likelihood-ratio test** uses:
+
+-   **Statistic:** $\Lambda = -2 \bigl( \ell_{\text{reduced}} - \ell_{\text{full}} \bigr)$, which is the same as (Deviance_reduced − Deviance_full).
+-   Under the null that the extra parameters are zero, $\Lambda$ follows (approximately) a **chi-squared distribution** with degrees of freedom = difference in number of parameters.
+
+A **small p-value** means the full model fits significantly better than the reduced model.
+
+------------------------------------------------------------------------
+
+## 4.2. LRT with `anova()` (base R)
+
+**Explanation:** For two `glm` objects (reduced and full), you can use **`anova(reduced, full, test = "Chisq")`**. R computes the difference in deviance and the chi-squared test.
+
+**Example:**
+
+```{r anova-lrt}
+# Reduced: low ~ age
+# Full:    low ~ age + lwt
+anova(fit1, fit2, test = "Chisq")
+```
+
+The **Pr(\>Chi)** is the p-value for the likelihood-ratio test. If it is small (e.g. \< 0.05), adding `lwt` improves the model.
+
+------------------------------------------------------------------------
+
+### Exercise 4.2.1: Run an LRT with anova
+
+Using `fit_lwt` (low \~ lwt) and `fit2` (low \~ age + lwt), run `anova(fit_lwt, fit2, test = "Chisq")`. Interpret the p-value: does adding `age` to the model with `lwt` improve fit?
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 4.3. LRT with `lrtest()` (lmtest)
+
+**Explanation:** The **lmtest** package provides **`lrtest()`**. You give it the reduced model first, then the full model. It returns the same kind of comparison (chi-squared statistic and p-value).
+
+**Example:**
+
+```{r lrtest-example}
+library(lmtest)
+lrtest(fit1, fit2)
+```
+
+You should see a small table with the log-likelihoods and the chi-squared test result, consistent with `anova(..., test = "Chisq")`.
+
+------------------------------------------------------------------------
+
+### Exercise 4.3.1: Run an LRT with lrtest
+
+Load **lmtest** and run `lrtest(fit1, fit2)` again. Then run `lrtest(fit_lwt, fit2)` and confirm the p-value matches (or is close to) the one you got with `anova()` in Exercise 4.2.1.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+## 4.4. Full example and exercise
+
+**Example:** Compare a null model (intercept only), a one-predictor model, and a two-predictor model:
+
+```{r full-lrt-example}
+# Null: no predictors
+fit0 <- glm(low ~ 1, data = birthwt, family = binomial)
+# Add age
+fit1 <- glm(low ~ age, data = birthwt, family = binomial)
+# Add lwt
+fit2 <- glm(low ~ age + lwt, data = birthwt, family = binomial)
+
+anova(fit0, fit1, fit2, test = "Chisq")
+```
+
+Each row compares the current model to the previous one (e.g. fit1 vs fit0, then fit2 vs fit1).
+
+------------------------------------------------------------------------
+
+### Exercise 4.4.1: Sequence of LRTs
+
+Fit three models on `birthwt`: (1) `low ~ 1`, (2) `low ~ smoke`, (3) `low ~ smoke + age`. Run a single `anova()` with all three models and `test = "Chisq"`. For each step, state whether adding the predictor significantly improves the model (use p \< 0.05 as cutoff).
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+# 5. End-to-End Example: Data Check, Logistic Model, and LRT
+
+This section ties together: **loading packages**, **checking a data frame**, **fitting a logistic regression**, and **comparing models with a likelihood-ratio test**.
+
+**Steps:**
+
+1.  Load **MASS** and **lmtest**.
+2.  Load **birthwt** and run basic checks: `dim()`, `names()`, `str()`, `summary()`, and `colSums(is.na(birthwt))`.
+3.  Fit reduced model: `low ~ age`; full model: `low ~ age + lwt + smoke`.
+4.  Run LRT with `anova(reduced, full, test = "Chisq")` and interpret.
+
+**Example code:**
+
+```{r end-to-end}
+library(MASS)
+library(lmtest)
+data(birthwt)
+
+# Data check
+dim(birthwt)
+names(birthwt)
+str(birthwt)
+summary(birthwt)
+colSums(is.na(birthwt))
+
+# Models
+red <- glm(low ~ age, data = birthwt, family = binomial)
+full <- glm(low ~ age + lwt + smoke, data = birthwt, family = binomial)
+summary(full)
+anova(red, full, test = "Chisq")
+```
+
+------------------------------------------------------------------------
+
+### Final exercise: Full workflow
+
+1.  Use **birthwt** (or your own data with a binary outcome).
+2.  Run at least three data-check commands from Section 2 (e.g. `str()`, `summary()`, `colSums(is.na(...))`).
+3.  Fit a logistic model with two or more predictors of your choice.
+4.  Fit a reduced model with one fewer predictor.
+5.  Run a likelihood-ratio test between the reduced and full model and interpret the p-value.
+
+```{r}
+# Write your answer below:
+```
+
+------------------------------------------------------------------------
+
+# What to do next
+
+-   Try the same workflow with the Metabolic Syndrome data from the main tutorial (create a binary outcome, e.g. high BMI or metabolic syndrome yes/no, then fit logistic models and compare with LRT).
+-   Explore **`broom`** or **`broom.mixed`** for tidy model summaries, and **`gtsummary`** for publication-ready tables of regression results.
+
+------------------------------------------------------------------------
+
+*This extended tutorial builds on the main Rtutorial and adds: installing/loading packages, using library and package functions, data loading (CSV, Excel) and data checking (dimensions, data types, missing values), logistic regression with `glm()`, and likelihood-ratio tests with `anova()` and `lrtest()`.*
